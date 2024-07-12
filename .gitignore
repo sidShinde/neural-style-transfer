@@ -1,4 +1,5 @@
 # Folders
 venv/
+__pycache__/
 data/*
 checkpoints/*

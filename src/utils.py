@@ -1,4 +1,5 @@
 import torch
+import os
 
 
 class EarlyStopper:
@@ -26,7 +27,8 @@ class SaveBestModel:
     model state.
     """
 
-    def __init__(self, best_valid_loss=float("inf")):
+    def __init__(self, save_folder, best_valid_loss=float("inf")):
+        self.save_folder = save_folder
         self.best_valid_loss = best_valid_loss
 
     def __call__(self, current_valid_loss, epoch, model, optimizer):
@@ -41,11 +43,11 @@ class SaveBestModel:
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": current_valid_loss,
                 },
-                "checkpoints/best_model.pth",
+                os.path.join(self.save_folder, "best_model.pth"),
             )
 
 
-def save_model(epochs, model, optimizer, curr_loss):
+def save_model(file_path, epochs, model, optimizer, curr_loss):
     """
     Function to save the trained model to disk.
     """
@@ -57,5 +59,5 @@ def save_model(epochs, model, optimizer, curr_loss):
             "optimizer_state_dict": optimizer.state_dict(),
             "loss": curr_loss,
         },
-        "checkpoints/final_model.pth",
+        file_path,
     )

@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from itertools import cycle
 from tqdm import tqdm
+from datetime import datetime
+import os
 
 # Internal imports
 from src.utils import SaveBestModel, save_model
@@ -122,8 +124,8 @@ class Generator(nn.Module):
 
         for up, skip in zip(self.up_stack, skips):
             x = up(x)
-            # x = torch.cat((x, skip), dim=1)
-            x = torch.cat((x, skip))
+            x = torch.cat((x, skip), dim=1)
+            # x = torch.cat((x, skip))
 
         x = self.last(x)
         return x
@@ -223,7 +225,10 @@ class CycleGAN(nn.Module):
         # num_imgs = photo_ds.num_imgs
 
         for i, (real_monet, real_photo) in enumerate(
-            zip(cycle(monet_ds), tqdm(photo_ds, ncols=100))
+            zip(
+                tqdm(monet_ds, ncols=100, desc="Training for this epoch"),
+                photo_ds,
+            )
         ):
             real_monet = real_monet.to(DEVICE)
             real_photo = real_photo.to(DEVICE)
@@ -276,7 +281,7 @@ class CycleGAN(nn.Module):
                 + total_cycle_loss
                 + self.identity_loss(real_monet, same_monet, self.lambda_cycle)
             )
-            running_monet_gen_loss += total_monet_gen_loss.item()
+            # running_monet_gen_loss += total_monet_gen_loss.item()
             # print("total monet gen loss size: ", total_monet_gen_loss.size())
             # print("total monet gen loss: ", total_monet_gen_loss.item())
             total_monet_gen_loss.backward(retain_graph=True)
@@ -286,16 +291,16 @@ class CycleGAN(nn.Module):
                 + total_cycle_loss
                 + self.identity_loss(real_photo, same_photo, self.lambda_cycle)
             )
-            running_photo_gen_loss += total_photo_gen_loss.item()
+            # running_photo_gen_loss += total_photo_gen_loss.item()
             total_photo_gen_loss.backward(retain_graph=True)
 
             # evaluate total discriminator loss
             monet_disc_loss = self.discriminator_loss(disc_real_monet, disc_fake_monet)
-            running_monet_disc_loss += monet_disc_loss.item()
+            # running_monet_disc_loss += monet_disc_loss.item()
             monet_disc_loss.backward(retain_graph=True)
 
             photo_disc_loss = self.discriminator_loss(disc_real_photo, disc_fake_photo)
-            running_photo_disc_loss += photo_disc_loss.item()
+            # running_photo_disc_loss += photo_disc_loss.item()
             photo_disc_loss.backward()
 
             # Adjust the learning weights
@@ -305,21 +310,28 @@ class CycleGAN(nn.Module):
             self.p_disc_optimizer.step()
 
         return {
-            "monet_gen_loss": running_monet_gen_loss / i,
-            "photo_gen_loss": running_photo_gen_loss / i,
-            "monet_disc_loss": running_monet_disc_loss / i,
-            "photo_disc_loss": running_photo_disc_loss / i,
+            "monet_gen_loss": total_monet_gen_loss,
+            "photo_gen_loss": total_photo_gen_loss,
+            "monet_disc_loss": monet_disc_loss,
+            "photo_disc_loss": photo_disc_loss,
         }
 
-    def train(self, monet_ds, photo_ds, epochs=25):
-        save_best_model = SaveBestModel()
+    def train(self, monet_ds, photo_ds, epochs=25, save_models=False):
+        if save_models:
+            dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_folder = os.path.join(os.getcwd(), "checkpoints", dt)
+            if not os.path.exists(out_folder):
+                os.mkdir(out_folder)
+
+            save_best_model = SaveBestModel(save_folder=out_folder)
 
         for i in range(epochs):
+            print("Epoch {:d}".format(i + 1))
+
             loss = self.train_step(monet_ds, photo_ds)
 
             print(
-                "Epoch {:d} | photo_gen_loss: {:.4f}; monet_gen_loss: {:.4f}; photo_disc_loss: {:.4f}; monet_disc_loss: {:.4f}".format(
-                    i + 1,
+                "photo_gen_loss: {:.4f}; monet_gen_loss: {:.4f}; photo_disc_loss: {:.4f}; monet_disc_loss: {:.4f}\n".format(
                     loss["photo_gen_loss"],
                     loss["monet_gen_loss"],
                     loss["photo_disc_loss"],
@@ -327,7 +339,18 @@ class CycleGAN(nn.Module):
                 )
             )
 
-            save_best_model(loss["monet_gen_loss"], i, self.m_gen, self.m_gen_optimizer)
+            if save_models:
+                save_best_model(
+                    loss["monet_gen_loss"], i, self.m_gen, self.m_gen_optimizer
+                )
 
         # Save last epoch checkpoint
-        save_model(epochs, self.m_gen, self.m_gen_optimizer, loss["monet_gen_loss"])
+        if save_models:
+            model_path = os.path.join(out_folder, "final_model.pth")
+            save_model(
+                model_path,
+                epochs,
+                self.m_gen,
+                self.m_gen_optimizer,
+                loss["monet_gen_loss"],
+            )
