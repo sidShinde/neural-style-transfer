@@ -9,7 +9,7 @@ else:
     DEVICE = torch.device("cpu")
 
 # Data loader
-DATA_SIZE = 15
+DATA_SIZE = 300
 monet_ds = CustomImageDataset("./data/monet_jpg", num_imgs=DATA_SIZE)
 monet_dl = torch.utils.data.DataLoader(monet_ds, shuffle=True)
 
