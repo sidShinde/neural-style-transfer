@@ -3,4 +3,3 @@ venv/
 3p9_venv/
 __pycache__/
 data/*
-checkpoints/*

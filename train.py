@@ -30,4 +30,4 @@ cycle_gan_model = CycleGAN(
 )
 
 cycle_gan_model.to(device=DEVICE)
-cycle_gan_model.train(monet_ds=monet_dl, photo_ds=photo_dl, epochs=4)
+cycle_gan_model.train(monet_ds=monet_dl, photo_ds=photo_dl, epochs=25, save_models=True)
