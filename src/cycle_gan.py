@@ -197,17 +197,17 @@ class CycleGAN(nn.Module):
         )
 
     def discriminator_loss(self, real, generated):
-        #         real_loss = nn.BCEWithLogitsLoss(reduction='none')(torch.ones_like(real), real)
-        real_loss = nn.BCEWithLogitsLoss()(torch.ones_like(real), real)
-        #         generated_loss = nn.BCEWithLogitsLoss(reduction='none')(torch.zeros_like(generated), generated)
-        generated_loss = nn.BCEWithLogitsLoss()(torch.zeros_like(generated), generated)
+        real_loss = nn.BCEWithLogitsLoss()(
+            real,
+            torch.ones_like(real),
+        )
+        generated_loss = nn.BCEWithLogitsLoss()(generated, torch.zeros_like(generated))
 
         total_disc_loss = real_loss + generated_loss
         return total_disc_loss * 0.5
 
     def generator_loss(self, generated):
-        #         return nn.BCEWithLogitsLoss(reduction='none')(torch.ones_like(generated), generated)
-        return nn.BCEWithLogitsLoss()(torch.ones_like(generated), generated)
+        return nn.BCEWithLogitsLoss()(generated, torch.ones_like(generated))
 
     def calc_cycle_loss(self, real_image, cycled_image, LAMBDA):
         loss = torch.mean(torch.abs(real_image - cycled_image))
@@ -218,13 +218,7 @@ class CycleGAN(nn.Module):
         return LAMBDA * 0.5 * loss
 
     def train_step(self, monet_ds, photo_ds):
-        running_monet_gen_loss = 0.0
-        running_photo_gen_loss = 0.0
-        running_monet_disc_loss = 0.0
-        running_photo_disc_loss = 0.0
-        # num_imgs = photo_ds.num_imgs
-
-        for i, (real_monet, real_photo) in enumerate(
+        for _, (real_monet, real_photo) in enumerate(
             zip(
                 tqdm(monet_ds, ncols=100, desc="Training for this epoch"),
                 photo_ds,
@@ -261,15 +255,12 @@ class CycleGAN(nn.Module):
 
             # evaluate generator loss
             monet_gen_loss = self.generator_loss(disc_fake_monet)
-            # print("monet gen loss size: ", monet_gen_loss.size())
             photo_gen_loss = self.generator_loss(disc_fake_photo)
 
             # evaluate total cycle consistency loss
             monet_cycle_loss = self.calc_cycle_loss(
                 real_monet, cycled_monet, self.lambda_cycle
             )
-            # print("monet cycle loss: ", monet_cycle_loss)
-            # print("monet cycle loss size: ", monet_cycle_loss.size())
             photo_cycle_loss = self.calc_cycle_loss(
                 real_photo, cycled_photo, self.lambda_cycle
             )
@@ -281,9 +272,6 @@ class CycleGAN(nn.Module):
                 + total_cycle_loss
                 + self.identity_loss(real_monet, same_monet, self.lambda_cycle)
             )
-            # running_monet_gen_loss += total_monet_gen_loss.item()
-            # print("total monet gen loss size: ", total_monet_gen_loss.size())
-            # print("total monet gen loss: ", total_monet_gen_loss.item())
             total_monet_gen_loss.backward(retain_graph=True)
 
             total_photo_gen_loss = (
@@ -291,16 +279,13 @@ class CycleGAN(nn.Module):
                 + total_cycle_loss
                 + self.identity_loss(real_photo, same_photo, self.lambda_cycle)
             )
-            # running_photo_gen_loss += total_photo_gen_loss.item()
             total_photo_gen_loss.backward(retain_graph=True)
 
             # evaluate total discriminator loss
             monet_disc_loss = self.discriminator_loss(disc_real_monet, disc_fake_monet)
-            # running_monet_disc_loss += monet_disc_loss.item()
             monet_disc_loss.backward(retain_graph=True)
 
             photo_disc_loss = self.discriminator_loss(disc_real_photo, disc_fake_photo)
-            # running_photo_disc_loss += photo_disc_loss.item()
             photo_disc_loss.backward()
 
             # Adjust the learning weights
@@ -310,10 +295,10 @@ class CycleGAN(nn.Module):
             self.p_disc_optimizer.step()
 
         return {
-            "monet_gen_loss": total_monet_gen_loss,
-            "photo_gen_loss": total_photo_gen_loss,
-            "monet_disc_loss": monet_disc_loss,
-            "photo_disc_loss": photo_disc_loss,
+            "monet_gen_loss": total_monet_gen_loss.item(),
+            "photo_gen_loss": total_photo_gen_loss.item(),
+            "monet_disc_loss": monet_disc_loss.item(),
+            "photo_disc_loss": photo_disc_loss.item(),
         }
 
     def train(self, monet_ds, photo_ds, epochs=25, save_models=False):
