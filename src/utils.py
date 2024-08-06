@@ -1,5 +1,6 @@
 import torch
 import os
+from typing import AnyStr
 
 
 class EarlyStopper:
@@ -61,3 +62,10 @@ def save_model(file_path, epochs, model, optimizer, curr_loss):
         },
         file_path,
     )
+
+
+def get_device() -> AnyStr:
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda:0"
+    return device

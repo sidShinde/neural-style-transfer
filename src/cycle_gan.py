@@ -5,9 +5,14 @@ from itertools import cycle
 from tqdm import tqdm
 from datetime import datetime
 import os
+import tempfile
+from pathlib import Path
+import ray.cloudpickle as pickle
+from ray.train import Checkpoint
+from ray import train
 
 # Internal imports
-from src.utils import SaveBestModel, save_model
+from src.utils import save_model, get_device
 
 
 OUTPUT_CHANNELS = 3
@@ -173,6 +178,7 @@ class CycleGAN(nn.Module):
         photo_generator,
         monet_discriminator,
         photo_discriminator,
+        device,
         lambda_cycle=10,
     ):
         super(CycleGAN, self).__init__()
@@ -180,6 +186,7 @@ class CycleGAN(nn.Module):
         self.p_gen = photo_generator
         self.m_disc = monet_discriminator
         self.p_disc = photo_discriminator
+        self.device = device
         self.lambda_cycle = lambda_cycle
 
         # define optimizers
@@ -224,8 +231,8 @@ class CycleGAN(nn.Module):
                 photo_ds,
             )
         ):
-            real_monet = real_monet.to(DEVICE)
-            real_photo = real_photo.to(DEVICE)
+            real_monet = real_monet.to(self.device)
+            real_photo = real_photo.to(self.device)
 
             # zero the gradients for batch
             self.m_gen_optimizer.zero_grad()
@@ -301,16 +308,23 @@ class CycleGAN(nn.Module):
             "photo_disc_loss": photo_disc_loss.item(),
         }
 
-    def train(self, monet_ds, photo_ds, epochs=25, save_models=False):
+    def train(
+        self,
+        monet_ds,
+        photo_ds,
+        start_epoch=0,
+        epochs=25,
+        save_models=False,
+        tune=False,
+    ):
+        best_loss = float("inf")
         if save_models:
             dt = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_folder = os.path.join(os.getcwd(), "checkpoints", dt)
             if not os.path.exists(out_folder):
                 os.mkdir(out_folder)
 
-            save_best_model = SaveBestModel(save_folder=out_folder)
-
-        for i in range(epochs):
+        for i in range(start_epoch, epochs):
             print("Epoch {:d}".format(i + 1))
 
             loss = self.train_step(monet_ds, photo_ds)
@@ -324,10 +338,42 @@ class CycleGAN(nn.Module):
                 )
             )
 
-            if save_models:
-                save_best_model(
-                    loss["monet_gen_loss"], i, self.m_gen, self.m_gen_optimizer
+            if save_models and loss["monet_gen_loss"] < best_loss:
+                best_loss = loss["monet_gen_loss"]
+                model_path = os.path.join(out_folder, "best_model.pth")
+                save_model(
+                    model_path,
+                    i,
+                    self.m_gen,
+                    self.m_gen_optimizer,
+                    loss["monet_gen_loss"],
                 )
+
+            if tune:
+                checkpoint_data = {
+                    "epoch": i,
+                    "model_state_dict": self.state_dict(),
+                    "m_gen_optimizer": self.m_gen_optimizer.state_dict(),
+                    "p_gen_optimizer": self.p_gen_optimizer.state_dict(),
+                    "m_disc_optimizer": self.m_disc_optimizer.state_dict(),
+                    "p_disc_optimizer": self.p_disc_optimizer.state_dict(),
+                }
+
+                with tempfile.TemporaryDirectory() as checkpoint_dir:
+                    data_path = os.path.join(Path(checkpoint_dir), "data.pkl")
+                    with open(data_path, "wb") as fp:
+                        pickle.dump(checkpoint_data, fp)
+
+                    checkpoint = Checkpoint.from_directory(checkpoint_dir)
+                    train.report(
+                        {
+                            "photo_gen_loss": loss["photo_gen_loss"],
+                            "monet_gen_loss": loss["monet_gen_loss"],
+                            "photo_disc_loss": loss["photo_disc_loss"],
+                            "monet_disc_loss": loss["monet_disc_loss"],
+                        },
+                        checkpoint=checkpoint,
+                    )
 
         # Save last epoch checkpoint
         if save_models:
@@ -339,3 +385,27 @@ class CycleGAN(nn.Module):
                 self.m_gen_optimizer,
                 loss["monet_gen_loss"],
             )
+
+        print("Finished Training")
+
+
+def get_cycle_gan_model() -> CycleGAN:
+    device = get_device()
+
+    # Define model
+    monet_generator = Generator()
+    photo_generator = Generator()
+    monet_discriminator = Discriminator()
+    photo_discriminator = Discriminator()
+
+    model = CycleGAN(
+        monet_generator=monet_generator,
+        monet_discriminator=monet_discriminator,
+        photo_generator=photo_generator,
+        photo_discriminator=photo_discriminator,
+        device=device,
+    )
+    # if torch.cuda.device_count() > 1:
+    #     model = nn.DataParallel(model)
+    model.to(device)
+    return model
